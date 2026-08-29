@@ -16,6 +16,7 @@ import NotificationSettings from './NotificationSettings'
 import ScreenSettings from './ScreenSettings'
 import SecuritySettings from './SecuritySettings'
 import StyleSettings from './StyleSettings'
+import VisionSettings from './VisionSettings'
 
 const AppSettingsMenu = () => {
     const { t } = useTranslation()
@@ -33,6 +34,7 @@ const AppSettingsMenu = () => {
 
             <StyleSettings />
             <ChatSettings />
+            <VisionSettings />
             <ChatWindowSettings />
             <CharacterSettings />
             <GeneratingSettings />

@@ -22,7 +22,7 @@ import m0017 from './0017_regular_lady_ursula.sql';
 import m0018 from './0018_nice_loki.sql';
 import m0019 from './0019_youthful_captain_cross.sql';
 import m0020 from './0020_amusing_plazm.sql';
-import m0021 from './0021_productive_nebula.sql';
+import m0021 from './0021_glorious_ultron.sql';
 
   export default {
     journal,
@@ -51,4 +51,3 @@ m0020,
 m0021
     }
   }
-  

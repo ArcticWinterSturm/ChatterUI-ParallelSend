@@ -16,6 +16,15 @@ export class SSEFetch {
     private onClose = () => {}
     private closeStream = () => {}
     private cancelled = false
+    /**
+     * Carries partial SSE lines across network reads. A read boundary can cut
+     * a `data: {...}` line mid-JSON; the old code parsed each chunk in
+     * isolation, so both halves failed JSON.parse downstream (the paired
+     * "Unexpected end of input" / "Expect ':'" error storms) and the tokens
+     * they carried were silently DROPPED from the reply. Only lines terminated
+     * by a newline are dispatched; the tail waits for the next read.
+     */
+    private lineBuffer = ''
     public abort() {
         this.abortController.abort()
 
@@ -29,6 +38,10 @@ export class SSEFetch {
         this.abortController = new AbortController()
         const body = values.method === 'POST' ? { body: values.body } : {}
         this.cancelled = false
+        this.lineBuffer = ''
+        // Fresh decoder per stream: stream:true decoding keeps internal state
+        // for split multi-byte UTF-8 sequences.
+        this.decoder = new TextDecoder()
         try {
             const res = await fetch(values.endpoint, {
                 signal: this.abortController.signal,
@@ -52,8 +65,24 @@ export class SSEFetch {
                 const { value, done } = await reader.read()
                 if (done || this.cancelled) break
 
-                const data = this.decoder.decode(value)
-                const output = parseSSE(data)
+                // stream:true holds back incomplete multi-byte characters at
+                // the chunk edge instead of emitting replacement chars.
+                this.lineBuffer += this.decoder.decode(value, { stream: true })
+
+                // Dispatch only COMPLETE lines; keep the unterminated tail.
+                const lastNewline = this.lineBuffer.lastIndexOf('\n')
+                if (lastNewline === -1) continue
+                const complete = this.lineBuffer.slice(0, lastNewline)
+                this.lineBuffer = this.lineBuffer.slice(lastNewline + 1)
+
+                const output = parseSSE(complete)
+                output.forEach((item) => this.onEvent(item))
+            }
+            // Flush: final decoder state + any unterminated last line.
+            const tail = this.lineBuffer + this.decoder.decode()
+            this.lineBuffer = ''
+            if (tail.trim() && !this.cancelled) {
+                const output = parseSSE(tail)
                 output.forEach((item) => this.onEvent(item))
             }
         } catch (e) {
@@ -88,6 +117,7 @@ function parseSSE(message: string) {
             try {
                 JSON.parse(line)
                 output.push(line)
+                continue
             } catch {
                 continue
             }

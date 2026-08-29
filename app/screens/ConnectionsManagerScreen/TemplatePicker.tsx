@@ -10,6 +10,7 @@ import Aicons, { AiconsGlyphName } from '@components/icons/Aicons'
 import BottomSheet, { BottomSheetRef } from '@components/views/BottomSheet'
 import { APIConfiguration } from '@lib/engine/API/APIBuilder.types'
 import { APIManager } from '@lib/engine/API/APIManagerState'
+import { defaultTemplates } from '@lib/engine/API/DefaultAPI'
 import useAnimatedActiveColorStyle from '@lib/hooks/AnimatedActiveColorStyle'
 import { Theme } from '@lib/theme/ThemeManager'
 
@@ -84,20 +85,24 @@ const TemplatePicker: React.FC<TemplatePickerProps> = ({ ref, setPending }) => {
     const { t } = useTranslation()
     const [selected, setSelected] = useState<number | undefined>()
     const { color, fontSize, spacing } = Theme.useTheme()
-    const { addValue, getTemplates, valuesLength } = APIManager.useConnectionsStore(
+    const { addValue, valuesLength, customTemplates } = APIManager.useConnectionsStore(
         useShallow((state) => ({
             addValue: state.addValue,
-            getTemplates: state.getTemplates,
             valuesLength: state.values.length,
+            customTemplates: state.customTemplates,
         }))
     )
 
+    // `getTemplates` is a stable store function — memoizing on it alone froze
+    // this list for the lifetime of the component, so a template imported in
+    // Template Manager did not appear here until a full screen remount
+    // (exit to menu and back). Build from the subscribed template data instead.
     const templates = useMemo(
         () =>
-            getTemplates().sort(
+            [...defaultTemplates, ...customTemplates].sort(
                 (a, b) => (b.ui.display?.priority ?? 0) - (a.ui.display?.priority ?? 0)
             ),
-        [getTemplates]
+        [customTemplates]
     )
 
     return (
@@ -137,7 +142,9 @@ const TemplatePicker: React.FC<TemplatePickerProps> = ({ ref, setPending }) => {
                     disabled={selected === undefined}
                     label={t('common.actions.create')}
                     onPress={() => {
-                        if (!selected) return
+                        // `selected` is an index — 0 is valid (was `!selected`,
+                        // which made the first template impossible to create)
+                        if (selected === undefined) return
                         const template = templates.at(selected)
                         if (!template) return
                         addValue({

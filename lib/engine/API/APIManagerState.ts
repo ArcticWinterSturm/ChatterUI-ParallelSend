@@ -112,10 +112,31 @@ export namespace APIManager {
             {
                 name: Storage.API,
                 storage: createMMKVStorage(),
-                version: 2,
+                version: 3,
                 migrate: (persistedState: any, version) => {
                     if (version === 1) {
                         persistedState.preferences = { showCustomFields: false }
+                    }
+                    if (version === 2) {
+                        // Heal templates imported before the verifyJSON fix:
+                        // they inherited the OpenAI reference's ENTIRE
+                        // ui.display block (name, icon, priority 10100) and
+                        // rendered as a second "OpenAI" instead of their own
+                        // name (e.g. Agnes). Drop the borrowed block — the UI
+                        // falls back to the template's root name.
+                        persistedState.customTemplates = (persistedState.customTemplates ?? []).map(
+                            (tpl: any) => {
+                                if (
+                                    tpl?.ui?.display?.name &&
+                                    tpl.name &&
+                                    tpl.ui.display.name !== tpl.name
+                                ) {
+                                    const { display, ...ui } = tpl.ui
+                                    return { ...tpl, ui }
+                                }
+                                return tpl
+                            }
+                        )
                     }
                     return persistedState
                 },
@@ -147,6 +168,11 @@ const verifyJSON = (source: any, target: any): any => {
         }
         for (const key of Object.keys(targetObj)) {
             if (key === 'samplerFields') continue
+            // NEVER inherit the reference template's display identity —
+            // filling `ui.display` from the OpenAI default made every custom
+            // template without its own display block render as a second
+            // "OpenAI" (name, icon AND sort priority were copied).
+            if (key === 'display') continue
             if (!(key in sourceObj)) {
                 sourceObj[key] = targetObj[key]
             } else if (typeof targetObj[key] === 'object' && targetObj[key] !== null) {
@@ -155,7 +181,15 @@ const verifyJSON = (source: any, target: any): any => {
         }
         return sourceObj
     }
-    return fillFields(source, target)
+    const result = fillFields(source, target)
+    // A display block that exists but carries no name would still fall back
+    // to config.name in the UI — but if it carries a name COPIED from a
+    // reference (pre-fix imports), prefer the template's own name when they
+    // conflict with the root name and the root name is unique.
+    if (result?.ui?.display && !source?.ui?.display?.name) {
+        result.ui.display.name = result.name
+    }
+    return result
 }
 
 function generateUniqueName(baseName: string, names: string[]) {

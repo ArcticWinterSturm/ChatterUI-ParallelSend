@@ -20,6 +20,7 @@ import {
     buildTextCompletionContext,
     ContextBuilderParams,
 } from './API/ContextBuilder'
+import { GenerationTaskData } from './Inference'
 import { Llama, LlamaConfig } from './Local/LlamaLocal'
 import { KV } from './Local/Model'
 
@@ -57,7 +58,16 @@ const getSamplerFields = (max_length?: number) => {
             const samplerItem = Samplers[item.samplerID]
             let cleanvalue = value
             if (typeof value === 'number')
-                if (item.samplerID === 'max_length' && max_length) {
+                if (
+                    item.samplerID === SamplerID.GENERATED_LENGTH &&
+                    (samplerItem.values.type === 'integer' ||
+                        samplerItem.values.type === 'float') &&
+                    value >= samplerItem.values.max
+                ) {
+                    // Slider at max = no limit: llama.cpp treats n_predict -1
+                    // as 'generate until stop/EOS'.
+                    cleanvalue = -1
+                } else if (item.samplerID === 'max_length' && max_length) {
                     cleanvalue = Math.min(value, max_length)
                 } else if (samplerItem.values.type === 'integer') cleanvalue = Math.floor(value)
             if (item.samplerID === SamplerID.DRY_SEQUENCE_BREAK) {
@@ -69,7 +79,7 @@ const getSamplerFields = (max_length?: number) => {
         .reduce((acc, obj) => Object.assign(acc, obj), {})
 }
 
-const buildLocalPayload = async () => {
+const buildLocalPayload = async (taskData: GenerationTaskData) => {
     const payloadFields = getSamplerFields()
     const rep_pen = payloadFields?.['penalty_repeat']
     const reasoning = payloadFields?.['enable_thinking'] as boolean
@@ -79,7 +89,7 @@ const buildLocalPayload = async () => {
     let mediaPaths: string[] = []
     const context = Llama.useLlamaModelStore.getState().context
 
-    const fields = await obtainFields()
+    const fields = await obtainFields(taskData.chatId)
 
     if (!fields) {
         return Logger.error('Failed to build fields')
@@ -98,7 +108,7 @@ const buildLocalPayload = async () => {
     }
     const hasAudio = completionType.type === 'chatCompletions' && completionType.supportsAudio
     const hasImage = completionType.type === 'chatCompletions' && completionType.supportsImages
-    const bufferExists = !!Chats.useChatState.getState().buffer.data
+    const bufferExists = !!Chats.useChatState.getState().buffers[taskData.swipeId]?.data
 
     if (mmkv.getBoolean(AppSettings.UseModelTemplate)) {
         const messages = await buildChatCompletionContext({ apiConfig, ...rest })
@@ -184,9 +194,9 @@ const constructStopSequence = (): string[] => {
     return Instructs.useInstruct.getState().getStopSequence()
 }
 
-const stopGenerating = () => {
+const stopGenerating = (swipeId: number) => {
     // kept this helper for extendability
-    useInference.getState().stopGenerating()
+    useInference.getState().stopGenerating(swipeId)
 }
 
 const constructReplaceStrings = (): string[] => {
@@ -232,11 +242,16 @@ const verifyModelLoaded = async (): Promise<boolean> => {
     return true
 }
 
-export const localInference = async () => {
+export const localInference = async (taskData?: GenerationTaskData) => {
+    if (!taskData) {
+        Logger.error('Local Inference Failed: no task data')
+        return
+    }
+    const { swipeId } = taskData
     try {
         // Model Loading Routine
         if (!(await verifyModelLoaded())) {
-            return stopGenerating()
+            return await stopGenerating(swipeId)
         }
 
         // verify that model has been loaded
@@ -244,15 +259,15 @@ export const localInference = async () => {
 
         if (!context) {
             Logger.warnToast(t('model.toast.noModelLoaded'))
-            stopGenerating()
+            await stopGenerating(swipeId)
             return
         }
 
-        const payload = await buildLocalPayload()
+        const payload = await buildLocalPayload(taskData)
 
         if (!payload) {
             Logger.warnToast(t('generation.errors.failedToBuildPayload'))
-            stopGenerating()
+            await stopGenerating(swipeId)
             return
         }
 
@@ -266,7 +281,7 @@ export const localInference = async () => {
                     title: 'Cache Mismatch',
                     description: `KV Cache does not match current prompt:\n\n${result.matchLength} of ${result.cachedLength} tokens are identical.\n\nPress 'Load Anyway' if you don't mind losing the cache.`,
                     buttons: [
-                        { label: 'Cancel', onPress: stopGenerating },
+                        { label: 'Cancel', onPress: () => stopGenerating(swipeId) },
                         {
                             label: 'Load Anyway',
                             onPress: async () => {
@@ -275,12 +290,12 @@ export const localInference = async () => {
                                 if (result) {
                                     KV.useKVStore.getState().setKvCacheLoaded(true)
                                 }
-                                runLocalCompletion(payload)
+                                runLocalCompletion(swipeId, payload)
                             },
                             type: 'warning',
                         },
                     ],
-                    onDismiss: stopGenerating,
+                    onDismiss: () => stopGenerating(swipeId),
                 })
                 return
             }
@@ -290,14 +305,15 @@ export const localInference = async () => {
                 KV.useKVStore.getState().setKvCacheLoaded(true)
             }
         }
-        await runLocalCompletion(payload)
+        await runLocalCompletion(swipeId, payload)
     } catch (e) {
-        Logger.errorToast(t('model.toast.failedToRunLocalInference'), JSON.stringify(e))
-        stopGenerating()
+        Logger.errorToast(t('model.toast.failedToRunLocalInference'), Logger.formatError(e))
+        await stopGenerating(swipeId)
     }
 }
 
 const runLocalCompletion = async (
+    swipeId: number,
     payload: NonNullable<Awaited<ReturnType<typeof buildLocalPayload>>>
 ) => {
     const stopRegex = RegExp(
@@ -311,14 +327,14 @@ const runLocalCompletion = async (
         return text.replaceAll(stopRegex, '')
     }
 
-    useInference.getState().setAbort(async () => {
+    useInference.getState().setAbort(swipeId, async () => {
         await Llama.useLlamaModelStore.getState().stopCompletion()
     })
 
     let reasoningMode = false
     const outputStream = (text: string) => {
         const cleaned = cleanStopString(text)
-        Chats.useChatState.getState().insertToBuffer(cleanStopString(text))
+        Chats.useChatState.getState().insertToBuffer(swipeId, cleaned)
         /**
          * @TODO implement think seperation for TTS
          */
@@ -333,13 +349,14 @@ const runLocalCompletion = async (
             reasoningMode = true
             return
         }
+        console.log('tts', text)
         useTTSStore.getState().insertBuffer(cleanStopString(text))
     }
 
     const outputCompleted = (text: string, timings: CompletionTimings) => {
-        Chats.useChatState.getState().setBufferTimings(timings)
+        Chats.useChatState.getState().setBufferTimings(swipeId, timings)
         if (mmkv.getBoolean(AppSettings.PrintContext)) Logger.info(`Completion Output:\n${text}`)
-        stopGenerating()
+        stopGenerating(swipeId)
     }
 
     const engineData = Llama.useLlamaPreferencesStore.getState().config
@@ -348,8 +365,8 @@ const runLocalCompletion = async (
         .getState()
         .completion({ ...payload, n_threads: engineData.threads }, outputStream, outputCompleted)
         .catch((error) => {
-            Logger.errorToast(t('model.toast.failedToGenerateLocally'), JSON.stringify(error))
-            stopGenerating()
+            Logger.errorToast(t('model.toast.failedToGenerateLocally'), Logger.formatError(error))
+            stopGenerating(swipeId)
         })
 }
 
@@ -424,7 +441,7 @@ const localAPIConfig: APIConfiguration = {
 
 // This is the 'big orchestrator' which compiles fields from
 // the whole app to send inference requests
-const obtainFields = async (): Promise<ContextBuilderParams | void> => {
+const obtainFields = async (chatId: number): Promise<ContextBuilderParams | void> => {
     try {
         const userState = Characters.useUserStore.getState()
         const characterState = Characters.useCharacterStore.getState()
@@ -442,7 +459,6 @@ const obtainFields = async (): Promise<ContextBuilderParams | void> => {
             Logger.errorToast(t('generation.errors.noCharacter'))
             return
         }
-        const chatId = await Chats.useChatState.getState().id
         if (!chatId) {
             Logger.errorToast(t('generation.errors.noActiveChat'))
             return
@@ -472,7 +488,13 @@ const obtainFields = async (): Promise<ContextBuilderParams | void> => {
         const samplers = SamplersManager.getCurrentSampler()
 
         const instructLength = engineData.context_length
-        const length = Math.max(instructLength - samplers.genamt, 0)
+        // Uncapped generated-length sentinel (slider at max) must not consume
+        // the entire prompt budget.
+        const genValuesLocal = Samplers[SamplerID.GENERATED_LENGTH].values
+        const genUncapped =
+            (genValuesLocal.type === 'integer' || genValuesLocal.type === 'float') &&
+            samplers.genamt >= genValuesLocal.max
+        const length = Math.max(instructLength - (genUncapped ? 0 : samplers.genamt), 0)
 
         return {
             apiConfig: Object.assign({}, apiConfig),
@@ -487,17 +509,18 @@ const obtainFields = async (): Promise<ContextBuilderParams | void> => {
                 if (entry.id === -1) return 0
                 const [activeSwipe] = entry.swipes.filter((item) => item.active)
                 if (!activeSwipe) return 0
-                const tokenCount = activeSwipe.token_count ?? 0
-                if (tokenCount === 0 && activeSwipe.swipe.length > 0) {
-                    // assume that token length hasnt been calculated
-                    const tokenCount = await Llama.useLlamaModelStore.getState().tokenLength(
-                        activeSwipe.swipe,
-                        entry.attachments.map((item) => item.uri)
-                    )
-                    Chats.db.mutate.updateSwipeTokenLength(activeSwipe.id, tokenCount)
-                }
-
-                return tokenCount
+                // FIX: read `token_length` (the actual schema column) instead of
+                // the never-populated `token_count`, and return the freshly
+                // computed value instead of the stale 0.
+                const cached = activeSwipe.token_length ?? 0
+                if (cached > 0) return cached
+                if (activeSwipe.swipe.length === 0 && entry.attachments.length === 0) return 0
+                const computed = await Llama.useLlamaModelStore.getState().tokenLength(
+                    activeSwipe.swipe,
+                    entry.attachments.map((item) => item.uri)
+                )
+                await Chats.db.mutate.updateSwipeTokenLength(activeSwipe.id, computed)
+                return computed
             },
             tokenizer: Llama.useLlamaModelStore.getState().tokenLength,
             maxLength: length,
@@ -508,6 +531,9 @@ const obtainFields = async (): Promise<ContextBuilderParams | void> => {
             },
         }
     } catch (e) {
-        Logger.errorToast(t('generation.errors.failedToOrchestrateRequestBuild'), JSON.stringify(e))
+        Logger.errorToast(
+            t('generation.errors.failedToOrchestrateRequestBuild'),
+            Logger.formatError(e)
+        )
     }
 }

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { ScrollView, StyleSheet, Text, View } from 'react-native'
 import { useShallow } from 'zustand/react/shallow'
@@ -29,6 +29,9 @@ const ConnectionEditor: React.FC<ConnectionEditorProps> = ({ index, ref, origina
     const styles = useStyles()
     const { t } = useTranslation()
 
+    // The selector includes `customTemplates` so freshly imported templates
+    // resolve here without a screen remount — `getTemplates` alone is a stable
+    // function ref and never triggers a re-render.
     const { editValue, getTemplates, removeValue, addValue, showCustomFields } =
         APIManager.useConnectionsStore(
             useShallow((state) => ({
@@ -37,15 +40,19 @@ const ConnectionEditor: React.FC<ConnectionEditorProps> = ({ index, ref, origina
                 editValue: state.editValue,
                 addValue: state.addValue,
                 showCustomFields: state.preferences.showCustomFields,
+                customTemplates: state.customTemplates,
             }))
         )
 
     const [values, setValues] = useState<APIManagerValue>(originalValues)
     const [modelList, setModelList] = useState<any[]>([])
 
-    const template = useMemo(() => {
-        return getTemplates().find((item) => item.name === values.configName) ?? getTemplates()[0]
-    }, [values.configName, getTemplates])
+    // Not memoized on purpose: memoizing on the stable `getTemplates` ref froze
+    // this lookup, so custom templates imported after mount never resolved
+    // (until a full remount). The find over ~20 templates is negligible, and
+    // the `customTemplates` subscription above re-renders on imports.
+    const allTemplates = getTemplates()
+    const template = allTemplates.find((item) => item.name === values.configName) ?? allTemplates[0]
 
     const handleGetModelList = useCallback(
         async (values: APIValues) => {

@@ -190,7 +190,7 @@ export namespace Llama {
             }
 
             const llamaContext = await initLlama(params, progressCallback).catch((error) => {
-                Logger.errorToast(t('model.toast.couldNotLoadModel'), JSON.stringify(error))
+                Logger.errorToast(t('model.toast.couldNotLoadModel'), Logger.formatError(error))
                 if (model.file_path.includes('content://')) {
                     closeFd(model_path)
                 }
@@ -223,7 +223,7 @@ export namespace Llama {
                     closeFd(model_path)
                 }
 
-                Logger.errorToast(t('model.toast.failedToLoadMMPROJ'), JSON.stringify(e))
+                Logger.errorToast(t('model.toast.failedToLoadMMPROJ'), Logger.formatError(e))
             })
             if (await context.isMultimodalEnabled()) {
                 const capabilities = await context.getMultimodalSupport()
@@ -259,7 +259,7 @@ export namespace Llama {
             await get()
                 .context?.releaseMultimodal()
                 .catch((e) => {
-                    Logger.errorToast(t('model.toast.failedToUnloadMMPROJ'), JSON.stringify(e))
+                    Logger.errorToast(t('model.toast.failedToUnloadMMPROJ'), Logger.formatError(e))
                 })
             set({
                 mmproj: undefined,

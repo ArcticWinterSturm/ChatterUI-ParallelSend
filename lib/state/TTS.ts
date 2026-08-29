@@ -44,17 +44,23 @@ type TTSState = {
 const sentenceEndRegex =
     /(?<=[^\d])([。…？！.?!])(?:["'`*_)]*)\s+(?=[A-Z0-9])|([。…？！.?!])(?:["'`*_)]*)$/gm
 
-useInference.subscribe(async ({ nowGenerating }) => {
+// Track per-swipe generation lifecycles: with parallel generations the global
+// nowGenerating flag no longer means "this chat started/finished". Diff the
+// active map and only react to generations belonging to the chat in view.
+useInference.subscribe(async ({ active }, { active: prevActive }) => {
+    if (active === prevActive) return
     const chatId = Chats.useChatState.getState().id
-
     if (!chatId) return
-    const swipe = await Chats.db.query.chatLatestSwipe(chatId)
-    if (!swipe) return
 
-    if (!nowGenerating) {
+    const started = Object.values(active).find((g) => g.chatId === chatId && !prevActive[g.swipeId])
+    const ended = Object.values(prevActive).find((g) => g.chatId === chatId && !active[g.swipeId])
+
+    if (started) {
+        useTTSStore.getState().handleStartGeneration(started.swipeId)
+    } else if (ended) {
+        const swipe = await Chats.db.query.chatLatestSwipe(chatId)
+        if (!swipe) return
         useTTSStore.getState().handleEndGeneration(swipe.id, swipe.swipe)
-    } else {
-        useTTSStore.getState().handleStartGeneration(swipe.id)
     }
 })
 

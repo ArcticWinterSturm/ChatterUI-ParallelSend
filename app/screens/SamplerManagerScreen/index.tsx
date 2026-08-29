@@ -18,6 +18,7 @@ import InputSheet from '@components/views/InputSheet'
 import { SamplerID, Samplers } from '@lib/constants/SamplerData'
 import { APIConfiguration, APISampler } from '@lib/engine/API/APIBuilder.types'
 import { APIManager as APIStateNew } from '@lib/engine/API/APIManagerState'
+import { defaultTemplates } from '@lib/engine/API/DefaultAPI'
 import { localSamplerData } from '@lib/engine/LocalInference'
 import { useAppMode } from '@lib/state/AppMode'
 import { Logger } from '@lib/state/Logger'
@@ -61,7 +62,11 @@ const SamplerManagerScreen = () => {
             if (!template) return []
             return template.request.samplerFields
         }
-        return []
+        // No active connection yet: fall back to the default (OpenAI) field
+        // set so samplers can be created and tuned BEFORE any API connection
+        // exists. Values for fields a future template does not use are simply
+        // ignored at request-build time.
+        return defaultTemplates[0].request.samplerFields
     }
 
     const handleExportSampler = () => {

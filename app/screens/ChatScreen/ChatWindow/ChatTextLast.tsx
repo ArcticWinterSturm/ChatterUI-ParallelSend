@@ -19,10 +19,10 @@ const ChatTextLast: React.FC<ChatTextProps> = ({ nowGenerating, swipe }) => {
     const { t } = useTranslation()
     const { markdown, rules, style } = MarkdownStyle.useCustomFormatting()
 
-    const { buffer } = Chats.useBuffer()
+    const { buffer } = Chats.useBuffer(swipe.id)
     const [showHidden, setShowHidden] = useState(false)
     const viewRef = useRef<View>(null)
-    const currentSwipeId = useInference((state) => state.currentSwipeId)
+    const thisSwipeGenerating = useInference((state) => state.isSwipeGenerating(swipe.id))
     const animHeight = useAnimatedValue(-1)
     const targetHeight = useRef(-1)
     const firstRender = useRef(true)
@@ -65,13 +65,9 @@ const ChatTextLast: React.FC<ChatTextProps> = ({ nowGenerating, swipe }) => {
     return (
         <Animated.View style={{ overflow: 'scroll', height: animHeight }}>
             <View style={{ minHeight: 10 }} ref={viewRef} onLayout={updateHeight}>
-                {swipe.id === currentSwipeId && nowGenerating && buffer.data === '' && (
-                    <AnimatedEllipsis />
-                )}
+                {thisSwipeGenerating && buffer.data === '' && <AnimatedEllipsis />}
                 <Markdown mergeStyle={false} markdownit={markdown} rules={rules} style={style}>
-                    {nowGenerating && swipe.id === currentSwipeId
-                        ? buffer.data.trim()
-                        : renderedText}
+                    {thisSwipeGenerating ? buffer.data.trim() : renderedText}
                 </Markdown>
                 {filteredText.found && (
                     <View style={{ flexDirection: 'row' }}>

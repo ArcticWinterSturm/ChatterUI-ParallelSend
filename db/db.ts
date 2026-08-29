@@ -16,3 +16,9 @@ export type TableNames = {
 }[keyof typeof schema]
 
 sqliteDB.execAsync('PRAGMA foreign_keys = ON;')
+
+// Schema migrations (including v2 attachment columns sha256/width/height) are
+// applied by useMigrations(db, migrations) in app/index.tsx using the drizzle
+// journal (db/migrations/migrations.js, m0000–m0021). No hand-rolled ALTER
+// IIFE needed — that approach raced the migrator and was invisible to fresh
+// installs' journal.

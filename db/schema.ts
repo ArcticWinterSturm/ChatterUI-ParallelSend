@@ -222,6 +222,12 @@ export const chatAttachments = sqliteTable('chat_attachment', {
     mime_type: text('mime_type').notNull(),
     name: text('name').notNull(),
     size: integer('size').notNull().default(0),
+    // v2: content hash + dimensions, populated at attach time so desktop tools
+    // (Bifrons) can match attachments to the real photo library without pulling
+    // the binaries. sha256 = expo-crypto SHA256 of the file's base64 bytes.
+    sha256: text('sha256'),
+    width: integer('width').notNull().default(0),
+    height: integer('height').notNull().default(0),
 })
 
 export const mediaAttachmentsRelations = relations(chatAttachments, ({ one }) => ({
@@ -287,11 +293,9 @@ export const lorebooks = sqliteTable('lorebooks', {
     id: integer('id', { mode: 'number' }).primaryKey(),
     name: text('name').notNull(),
     description: text('description').notNull(),
-    scan_depth: integer('scan_depth'),
-    token_budget: integer('token_budget'),
-    recursive_scanning: integer('recursive_scanning', { mode: 'boolean' }).default(false),
-    // not in spec, specific for app use
-    active: integer('active', { mode: 'boolean' }).default(false),
+    scanDepth: integer('scan_depth'),
+    tokenBudget: integer('token_budget'),
+    recursiveScanning: integer('recursive_scanning', { mode: 'boolean' }).default(false),
 })
 
 export const lorebookEntries = sqliteTable('lorebook_entries', {
@@ -299,18 +303,14 @@ export const lorebookEntries = sqliteTable('lorebook_entries', {
     lorebook_id: integer('lorebook_id', { mode: 'number' })
         .notNull()
         .references(() => lorebooks.id, { onDelete: 'cascade' }),
-    keys: text('keys', { mode: 'json' }).notNull().$type<string[]>().notNull(),
+    keys: text('keys').notNull(),
     content: text('content').notNull(),
-    enable: integer('enable', { mode: 'boolean' }).default(true).notNull(),
-    insertion_order: integer('insertion_order').default(100).notNull(),
-    case_sensitive: integer('case_sensitive', { mode: 'boolean' }).default(true).notNull(),
-    name: text('name').notNull(),
-    priority: integer('priority').default(100).notNull(),
+    enable: integer('enable', { mode: 'boolean' }).default(true),
+    insertion_order: integer('insertion_order').default(100),
+    case_sensitive: integer('case_sensitive', { mode: 'boolean' }).default(true),
 
-    selective: integer('selective', { mode: 'boolean' }).default(false).notNull(),
-    constant: integer('constant', { mode: 'boolean' }).default(false).notNull(),
-    comment: text('comment').default('').notNull(),
-    secondary_keys: text('secondary_keys', { mode: 'json' }).notNull().$type<string[]>(),
+    name: text('name').notNull(),
+    priority: integer('priority').default(100),
 })
 
 export const characterLorebooks = sqliteTable(
@@ -455,8 +455,7 @@ export type ChatSwipe = typeof chatSwipes.$inferSelect
 export type ChatEntryType = typeof chatEntries.$inferSelect
 export type ChatType = typeof chats.$inferSelect
 export type ChatAttachmentType = typeof chatAttachments.$inferSelect
-export type LorebookType = typeof lorebooks.$inferSelect
-export type LorebookEntryType = typeof lorebookEntries.$inferSelect
+
 export type CompletionTimings = {
     predicted_per_token_ms: number
     predicted_per_second: number | null

@@ -52,6 +52,14 @@ export const useTextIntentFocus = () => {
 }
 
 const setAppDefaultSettings = () => {
+    // One-time correction: a prior mod build shipped DisableCamera defaulted
+    // to ON. The intended default is OFF — reset it once, then let the user's
+    // own choice persist from here on.
+    const cameraDefaultFixKey = 'migration-disable-camera-default-off'
+    if (!mmkv.getBoolean(cameraDefaultFixKey)) {
+        mmkv.set(AppSettings.DisableCamera, false)
+        mmkv.set(cameraDefaultFixKey, true)
+    }
     Object.keys(AppSettingsDefault).map((item) => {
         const data = mmkv.getBoolean(item)
         if (data !== undefined) return

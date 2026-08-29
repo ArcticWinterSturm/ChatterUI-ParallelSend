@@ -71,15 +71,12 @@ export const buildAndSendRequest = async (params: APIBuilderParams) => {
 
         const parseOutput = (event: any, pattern: string | string[], type: DataOutputType) => {
             try {
-                const data = getNestedValue(
-                    typeof event === 'string' ? JSON.parse(event) : event,
-                    pattern
-                ) as string | null
+                const data = getNestedValue(event, pattern) as string | null
                 const text = data?.replaceAll(replaceStrings, '') ?? ''
                 if (text) onData({ content: text, type: type })
                 return !!text?.trim()
             } catch (e) {
-                Logger.error(JSON.stringify(e))
+                Logger.error(Logger.formatError(e))
             }
             return false
         }
@@ -98,8 +95,22 @@ export const buildAndSendRequest = async (params: APIBuilderParams) => {
             endpoint: apiValues.endpoint,
             payload: payload,
             onEvent: (event) => {
+                // Parse the event ONCE — the old code re-parsed the raw string
+                // inside parseOutput for every pattern, so a single bad event
+                // logged the identical JSON error twice (text + reasoning).
+                let parsed: any = event
+                if (typeof event === 'string') {
+                    try {
+                        parsed = JSON.parse(event)
+                    } catch (e) {
+                        Logger.warn(
+                            `[SSE] Skipping unparseable event (${event.length} chars): ${Logger.formatError(e)}`
+                        )
+                        return
+                    }
+                }
                 for (const pattern of patternMapping) {
-                    if (parseOutput(event, pattern.pattern, pattern.type)) break
+                    if (parseOutput(parsed, pattern.pattern, pattern.type)) break
                 }
             },
             onEnd: onEnd,
@@ -107,7 +118,7 @@ export const buildAndSendRequest = async (params: APIBuilderParams) => {
             stopGenerating: stopGenerating,
         })
     } catch (e) {
-        Logger.errorToast(t('generation.errors.completionFailed'), JSON.stringify(e))
+        Logger.errorToast(t('generation.errors.completionFailed'), Logger.formatError(e))
         stopGenerating()
     }
 }

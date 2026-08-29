@@ -111,11 +111,10 @@ export namespace Logger {
         insertLogs(logItem)
     }
 
-    export const errorToast = (data: string, internal?: unknown) => {
+    export const errorToast = (data: string, internal?: string) => {
         error(data)
         if (internal) {
-            if (typeof internal === 'string') error(internal)
-            else if (internal instanceof Error) error(internal.message)
+            error(internal)
         }
         Toast.show(data, toastTime, { textColor: 'red' })
     }
@@ -151,6 +150,32 @@ export namespace Logger {
     export const stackTrace = (e: unknown) => {
         if (e instanceof Error && e.stack) {
             error(e.stack)
+        }
+    }
+
+    /**
+     * Serializes any thrown value into a diagnosable string.
+     *
+     * `JSON.stringify(err)` yields `"{}"` for Error instances because
+     * `message`/`stack` are non-enumerable — a field trace showed 75% of a
+     * session log reduced to literal `{}` lines, destroying all diagnostics.
+     * Always log caught values through this helper.
+     */
+    export const formatError = (e: unknown): string => {
+        if (e instanceof Error) {
+            const parts = [`${e.name}: ${e.message}`]
+            const stackLines = e.stack?.split('\n')?.slice(1, 6)?.join('\n')?.trim()
+            if (stackLines) parts.push(stackLines)
+            const cause = (e as { cause?: unknown }).cause
+            if (cause !== undefined) parts.push(`cause: ${String(cause)}`)
+            return parts.join('\n')
+        }
+        if (typeof e === 'string') return e
+        try {
+            const json = JSON.stringify(e)
+            return json === '{}' || json === undefined ? String(e) : json
+        } catch {
+            return String(e)
         }
     }
 }

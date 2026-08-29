@@ -183,28 +183,49 @@ export const collectContext = async (params: ContextBuilderParams & { mode: 'cha
             hasImage = result.hasImageNew
 
             if (result.attachments.length > 0) {
-                attachments = await Promise.all(
-                    result.attachments.map(async (item) => {
-                        const base64 = await readBase64Async(item.uri)
+                // Read each attachment defensively: one unreadable file must not
+                // reject the whole build (which previously killed the entire
+                // generation with 'promptConstructionFailed'). Missing files are
+                // skipped and surfaced to the user.
+                const loaded = await Promise.all(
+                    result.attachments.map(async (item): Promise<ContentTypes | null> => {
+                        try {
+                            const base64 = await readBase64Async(item.uri)
+                            if (!base64) throw new Error('empty read')
 
-                        if (item.type === 'image') {
+                            if (item.type === 'image') {
+                                return {
+                                    type: 'image_url',
+                                    image_url: {
+                                        url: `data:${item.mime_type};base64,${base64}`,
+                                    },
+                                }
+                            }
+
                             return {
-                                type: 'image_url',
-                                image_url: {
-                                    url: `data:${item.mime_type};base64,${base64}`,
+                                type: 'input_audio',
+                                input_audio: {
+                                    data: base64,
+                                    format: item.mime_type.split('/')[1],
                                 },
                             }
-                        }
-
-                        return {
-                            type: 'input_audio',
-                            input_audio: {
-                                data: base64,
-                                format: item.mime_type.split('/')[1],
-                            },
+                        } catch (e) {
+                            Logger.warnToast(
+                                t('generation.warn.attachmentUnreadable', {
+                                    name: item.name,
+                                    defaultValue:
+                                        'Attachment "{{name}}" could not be read and was skipped',
+                                })
+                            )
+                            Logger.warn(
+                                `[ContextBuilder] attachment read failed: ${item.uri}: ${e}`
+                            )
+                            return null
                         }
                     })
                 )
+                const valid = loaded.filter((item): item is ContentTypes => item !== null)
+                if (valid.length > 0) attachments = valid
             }
         }
 
@@ -377,7 +398,27 @@ export const buildChatCompletionContext = async (params: ContextBuilderParams) =
             payload.map((item) => {
                 const content = item[feats.contentName]
                 if (typeof content === 'string') return item
-                else return content.filter((item) => item.type === 'text')
+                // Keep the message shape and REDACT binary parts instead of
+                // silently dropping them — previous behavior made it impossible
+                // to confirm from a trace whether an image actually made it
+                // into the request.
+                return {
+                    role: item.role,
+                    [feats.contentName]: content.map((part) => {
+                        if (part.type === 'image_url')
+                            return {
+                                type: 'image_url',
+                                bytes: part.image_url.url.length,
+                            }
+                        if (part.type === 'input_audio')
+                            return {
+                                type: 'input_audio',
+                                bytes: part.input_audio.data.length,
+                                format: part.input_audio.format,
+                            }
+                        return part
+                    }),
+                }
             })
         )
     )

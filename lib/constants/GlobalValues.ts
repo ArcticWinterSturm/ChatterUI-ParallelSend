@@ -143,6 +143,14 @@ export enum AppSettings {
     WideChatMode = 'settings-wide-chat-mode',
     AlternatingChatMode = 'settings-alternative-chat-mode',
     KeepAwake = 'settings-keep-awake',
+    // Vision & Attachments
+    DisableCamera = 'settings-disable-camera',
+    SendOnAttach = 'settings-send-on-attach',
+    SwitchContextOnSend = 'settings-switch-context-on-send',
+    // Vision & Attachments — Experimental (Android-deep)
+    ChainCapture = 'settings-chain-capture',
+    RememberPickerPosition = 'settings-remember-picker-position',
+    SingleImageGuard = 'settings-single-image-guard',
 }
 
 /**
@@ -180,6 +188,26 @@ export const AppSettingsDefault: Record<AppSettings, boolean> = {
     [AppSettings.WideChatMode]: false,
     [AppSettings.AlternatingChatMode]: false,
     [AppSettings.KeepAwake]: true,
+    // Vision & Attachments — all OFF by default:
+    // DisableCamera=false keeps the camera/photo menu available;
+    // SendOnAttach fires the send as soon as the picker confirms;
+    // SwitchContextOnSend additionally opens a fresh conversation after each
+    // send so replies stream in parallel across chats.
+    [AppSettings.DisableCamera]: false,
+    [AppSettings.SendOnAttach]: false,
+    [AppSettings.SwitchContextOnSend]: false,
+    // Experimental additions — all OFF by default:
+    // ChainCapture: after a chained send, automatically reopens the image
+    //   picker (2 presses per vision job). HARD-GATED on DisableCamera +
+    //   SendOnAttach + SwitchContextOnSend all being ON.
+    // RememberPickerPosition: uses the legacy Android gallery picker, which
+    //   preserves scroll position (month/album) across launches — the modern
+    //   Android 13+ Photo Picker always reopens at Recents.
+    // SingleImageGuard: refuses to send when more than one image is attached
+    //   and puts the picker into single-select mode.
+    [AppSettings.ChainCapture]: false,
+    [AppSettings.RememberPickerPosition]: false,
+    [AppSettings.SingleImageGuard]: false,
 }
 
 export const CLAUDE_VERSION = '2023-06-01'

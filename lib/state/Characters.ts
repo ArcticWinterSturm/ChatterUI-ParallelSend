@@ -21,8 +21,10 @@ import {
 import { Tokenizer } from '@lib/engine/Tokenizer'
 import { Storage } from '@lib/enums/Storage'
 import {
+    AppDirectory,
     copyFile,
     deleteFile,
+    ensureDirectoryExists,
     fileExists,
     readBase64Async,
     readStringAsync,
@@ -30,6 +32,11 @@ import {
 } from '@lib/utils/File'
 import { replaceMacroBase } from '@lib/utils/Macros'
 
+import {
+    CARD_EXTENSION_KEY,
+    packEmbeddedPresets,
+    unpackEmbeddedPresets,
+} from './CardEmbeddedPresets'
 import { Logger } from './Logger'
 import { createMMKVStorage } from '../storage/MMKV'
 
@@ -660,13 +667,17 @@ export namespace Characters {
 
             export const createCharacter = async (card: CharacterCardV2, imageuri: string = '') => {
                 const { data } = card
-                const image_id = await database.transaction(async (tx) => {
+                // extensions are not a db column — split them off; the chatterui
+                // extension carries embedded instruct/sampler presets (unpacked
+                // below, after the transaction commits).
+                const { extensions, ...cardData } = data
+                const result = await database.transaction(async (tx) => {
                     try {
                         const [{ id, image_id }] = await tx
                             .insert(characters)
                             .values({
                                 type: 'character',
-                                ...data,
+                                ...cardData,
                             })
                             .returning({ id: characters.id, image_id: characters.image_id })
 
@@ -696,17 +707,22 @@ export namespace Characters {
                             }))
                             await tx.insert(characterTags).values(tagids).onConflictDoNothing()
                         }
-                        return image_id
+                        return { id, image_id }
                     } catch (error) {
                         Logger.errorToast(
                             t('common.errors.rollingBackDueToError'),
-                            JSON.stringify(error)
+                            Logger.formatError(error)
                         )
                         tx.rollback()
                         return undefined
                     }
                 })
-                if (image_id && imageuri) await copyImage(imageuri, image_id)
+                if (result?.image_id && imageuri) await copyImage(imageuri, result.image_id)
+                // Unpack embedded template + sampler AFTER the character exists so
+                // links can attach; the character opens with both applied.
+                if (result?.id && extensions) {
+                    await unpackEmbeddedPresets(result.id, extensions)
+                }
             }
 
             export const duplicateCard = async (charId: number) => {
@@ -722,7 +738,7 @@ export namespace Characters {
 
                 if (fileExists(imageDir)) {
                     cacheLoc = imageCacheDir
-                    copyFile({
+                    await copyFile({
                         from: imageDir,
                         to: cacheLoc,
                     })
@@ -817,7 +833,9 @@ export namespace Characters {
     }
 
     export const copyImage = async (uri: string, imageID: number) => {
-        copyFile({
+        // copyFile is a real async native call — must be awaited or readers race
+        // the disk write (see lib/utils/File.ts copyFile).
+        return await copyFile({
             from: uri,
             to: getImageDir(imageID),
         })
@@ -877,7 +895,54 @@ export namespace Characters {
         return db.mutate.createCharacter(converted, uri)
     }
 
+    /**
+     * Intelligent misfile guard: recognizes JSON that is clearly NOT a
+     * character card and names what it actually is + where it belongs,
+     * instead of the misleading "V2 failed, falling back to V1" →
+     * "Invalid Character Card" cascade.
+     */
+    const detectForeignJSON = (data: any): string | undefined => {
+        if (!data || typeof data !== 'object') return
+        // API connection template (Connections → Manage Templates)
+        if (
+            typeof data.request === 'object' &&
+            typeof data.payload === 'object' &&
+            (typeof data.features === 'object' || typeof data.defaultValues === 'object')
+        )
+            return t('character.editor.errors.jsonIsApiTemplate', {
+                defaultValue:
+                    'This file is an API connection Template — import it in Connections → ⚙ → Manage Templates',
+            })
+        // Instruct / formatting template (Formatting screen)
+        if (
+            typeof data.system_prompt === 'string' &&
+            typeof data.input_prefix === 'string' &&
+            typeof data.output_prefix === 'string'
+        )
+            return t('character.editor.errors.jsonIsInstruct', {
+                defaultValue:
+                    'This file is an Instruct/Formatting template — import it in the Formatting screen',
+            })
+        // Sampler configuration (Samplers screen)
+        if (
+            data.spec === undefined &&
+            data.name === undefined &&
+            ('temp' in data || 'genamt' in data || 'max_length' in data) &&
+            ('top_p' in data || 'top_k' in data || 'rep_pen' in data)
+        )
+            return t('character.editor.errors.jsonIsSampler', {
+                defaultValue:
+                    'This file is a Sampler configuration — import it in the Samplers screen',
+            })
+    }
+
     const createCharacterFromV2JSON = async (data: any, uri: string | undefined = undefined) => {
+        // Misfiled-import guard BEFORE any parse-fallback noise.
+        const foreign = detectForeignJSON(data)
+        if (foreign) {
+            Logger.errorToast(foreign)
+            return
+        }
         // check JSON def
         const result = characterCardV2Schema.safeParse(data)
         if (result.error) {
@@ -920,7 +985,17 @@ export namespace Characters {
         }
         // name can be empty string, should at least have something
         const exportedFileName = dbcard.name ?? 'Character'
-        const cardString = JSON.stringify(convertDBDataToCV2(dbcard))
+        const cv2 = convertDBDataToCV2(dbcard)
+        // Pack the character's template + sampler into the card so it is
+        // self-contained: importing it elsewhere unpacks and links both.
+        const embedded = await packEmbeddedPresets(dbcard.links)
+        if (embedded) {
+            cv2.data.extensions = {
+                ...(cv2.data.extensions ?? {}),
+                [CARD_EXTENSION_KEY]: embedded,
+            }
+        }
+        const cardString = JSON.stringify(cv2)
 
         const imagePath = getImageDir(dbcard.image_id)
         if (fileExists(imagePath)) {
@@ -949,8 +1024,17 @@ export namespace Characters {
         try {
             if (!fileExists(cardDefaultDir)) {
                 Logger.info('Importing default card.')
+                // The startup directory routine runs concurrently with this call
+                // on first boot — guarantee appAssets/ exists before writing.
+                ensureDirectoryExists(AppDirectory.Assets)
                 const [asset] = await Asset.loadAsync(require('./../../assets/models/aibot.raw'))
-                if (asset.localUri) copyFile({ from: asset.localUri, to: cardDefaultDir })
+                if (asset.localUri) {
+                    // Must await: the read below (createCharacterFromImage →
+                    // readBase64Async) raced the un-awaited native copy and hit
+                    // ENOENT on fresh installs ("Failed to create character").
+                    const copied = await copyFile({ from: asset.localUri, to: cardDefaultDir })
+                    if (!copied) throw new Error('failed to copy default card asset')
+                }
             }
             await createCharacterFromImage(cardDefaultDir)
         } catch (e) {
@@ -984,6 +1068,10 @@ const characterCardV2DataSchema = z.object({
     character_version: z.string().catch(''),
     alternate_greetings: z.string().array().catch([]),
     tags: z.string().array().catch([]),
+
+    // CCv2 spec extension field — carries the chatterui embedded presets
+    // (instruct template + sampler config). Unknown extensions pass through.
+    extensions: z.record(z.any()).optional().catch(undefined),
 })
 
 const characterCardV2Schema = z.object({

@@ -62,9 +62,7 @@ const ModelItem: React.FC<ModelItemProps> = ({
                 t('model.alert.deletemodel.description', { name: item.name }) +
                 (!isInvalid
                     ? !item.file_path.startsWith('content')
-                        ? t('model.alert.deletemodel.internal', {
-                              size: readableFileSize(item.file_size),
-                          })
+                        ? t('model.alert.deletemodel.internal', readableFileSize(item.file_size))
                         : t('model.alert.deletemodel.external')
                     : ''),
             buttons: [
@@ -203,7 +201,7 @@ const ModelItem: React.FC<ModelItemProps> = ({
                                         } catch (e) {
                                             Logger.errorToast(
                                                 t('model.toast.failedtolink'),
-                                                JSON.stringify(e)
+                                                Logger.formatError(e)
                                             )
                                         }
                                     }}

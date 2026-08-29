@@ -1,8 +1,8 @@
 import { t } from 'i18next'
-import BackgroundService from 'react-native-background-actions'
 
 import { ChatSwipe } from '@db/schema'
 import { AppSettings } from '@lib/constants/GlobalValues'
+import { SamplerID, Samplers as SamplerDefs } from '@lib/constants/SamplerData'
 import { isCloseThinkTag, isOpenThinkTag } from '@lib/markdown/ThinkTags'
 import { useAppModeStore } from '@lib/state/AppMode'
 import { Chats, useInference } from '@lib/state/Chat'
@@ -20,6 +20,11 @@ import { getDataSources } from './DataSources'
 import { localInference } from './LocalInference'
 import { Tokenizer } from './Tokenizer'
 
+export type GenerationTaskData = {
+    swipeId: number
+    chatId: number
+}
+
 export async function regenerateResponse(swipe: ChatSwipe, regenCache: boolean = true) {
     Logger.info('Regenerate Response' + (regenCache ? '' : ' , Resetting Message'))
 
@@ -27,7 +32,7 @@ export async function regenerateResponse(swipe: ChatSwipe, regenCache: boolean =
     if (regenCache)
         replacement = swipe.reset_length ? swipe.swipe.substring(0, swipe.reset_length) : ''
 
-    Chats.useChatState.getState().setBuffer({ data: replacement })
+    Chats.useChatState.getState().setBuffer(swipe.id, { data: replacement })
     await Chats.db.mutate.updateChatSwipe(swipe.id, replacement, {
         updateFinished: true,
         updateStarted: true,
@@ -40,84 +45,85 @@ export async function regenerateResponse(swipe: ChatSwipe, regenCache: boolean =
 export async function continueResponse(swipe: ChatSwipe) {
     Logger.info(`Continuing Response`)
     await Chats.db.mutate.updateSwipeResetLength(swipe.id, swipe.swipe.length)
-    Chats.useChatState.getState().insertToBuffer(swipe.swipe)
+    Chats.useChatState.getState().insertToBuffer(swipe.id, swipe.swipe)
     await generateResponse(swipe.id)
 }
 
-const completionTaskOptions = {
-    taskName: 'chatterui_completion_task',
-    taskTitle: 'Running completion...',
-    taskDesc: 'ChatterUI is running a completion task',
-    taskIcon: {
-        name: 'ic_launcher',
-        type: 'mipmap',
-    },
-    color: '#403737',
-    linkingURI: 'chatterui://',
-    progressBar: {
-        max: 1,
-        value: 0,
-        indeterminate: true,
-    },
-}
-
-export async function generateResponse(swipeId: number) {
-    if (useInference.getState().nowGenerating) {
+/**
+ * Starts a generation for a swipe. Generations are keyed per-swipe and tagged
+ * with their chat, so multiple chats can generate fully in parallel:
+ * - remote (API) mode: any number of concurrent streams, one per chat
+ * - local mode: the single llama context can only serve one completion, so a
+ *   second local request while one is running is rejected
+ *
+ * The Android keep-alive foreground service is NOT started here — it is
+ * refcounted app-wide by startGenerating/stopGenerating (see
+ * lib/engine/GenerationService.ts). react-native-background-actions is a
+ * singleton: starting it per generation overwrote the previous task's stop
+ * resolver and the first stream to finish killed the shared service for all
+ * still-streaming generations (field trace: 17 consecutive empty replies).
+ * The inference runner executes on the normal JS runtime.
+ */
+export async function generateResponse(swipeId: number, chatId?: number) {
+    const inference = useInference.getState()
+    if (inference.isSwipeGenerating(swipeId)) {
         Logger.infoToast(t('generation.errors.generationAlreadyInProgress'))
         return
     }
-    useInference.getState().startGenerating(swipeId)
-    Logger.info(`Obtaining response.`)
-    const appMode = useAppModeStore.getState().appMode
-
-    if (appMode === 'local') {
-        await BackgroundService.start(localInference, completionTaskOptions)
-    } else {
-        await BackgroundService.start(chatInferenceStream, completionTaskOptions)
+    const resolvedChatId = chatId ?? (await Chats.db.query.chatIdFromSwipe(swipeId))
+    if (!resolvedChatId) {
+        Logger.errorToast(t('generation.errors.noActiveChat'))
+        return
     }
+    if (inference.isChatGenerating(resolvedChatId)) {
+        // One generation per chat: a chat's context depends on its own entries.
+        Logger.infoToast(t('generation.errors.generationAlreadyInProgress'))
+        return
+    }
+    const appMode = useAppModeStore.getState().appMode
+    if (appMode === 'local' && inference.nowGenerating) {
+        // A single local llama context cannot serve parallel completions.
+        Logger.infoToast(t('generation.errors.generationAlreadyInProgress'))
+        return
+    }
+
+    useInference.getState().startGenerating(resolvedChatId, swipeId)
+    Logger.info(`Obtaining response.`)
+
+    const taskData: GenerationTaskData = { swipeId, chatId: resolvedChatId }
+    const runner = appMode === 'local' ? localInference : chatInferenceStream
+
+    // Fire on the JS runtime; every terminal path (stream end, abort, error)
+    // funnels through stopGenerating(swipeId), which releases the service ref.
+    runner(taskData).catch(async (e) => {
+        Logger.error(`Generation task failed: ${Logger.formatError(e)}`)
+        await useInference.getState().stopGenerating(swipeId)
+    })
 }
-// TODO: Use this
-/*
-const useGenerateResponse = () => {
-    const startGenerating = Chats.useChatState((state) => state.startGenerating)
-    const nowGenerating = useInference((state) => state.nowGenerating)
-    const appMode = useAppModeStore((state) => state.appMode)
 
-    const generateResponse = useCallback(
-        async (swipeId: number) => {
-            if (nowGenerating) {
-                Logger.infoToast(t('generation.errors.generationAlreadyInProgress'))
-                return
-            }
-            startGenerating(swipeId)
-            Logger.info(`Obtaining response.`)
-            const process = appMode === 'local' ? localInference : chatInferenceStream
-            await BackgroundService.start(process, completionTaskOptions)
-        },
-        [nowGenerating, appMode, startGenerating]
-    )
-
-    return generateResponse
-}*/
-
-async function chatInferenceStream() {
-    const fields = await obtainFields()
-    const stop = () => useInference.getState().stopGenerating()
+async function chatInferenceStream(taskData?: GenerationTaskData) {
+    if (!taskData) {
+        Logger.error('Chat Inference Failed: no task data')
+        return
+    }
+    const { swipeId, chatId } = taskData
+    const stop = () => useInference.getState().stopGenerating(swipeId)
+    const fields = await obtainFields(chatId)
     if (!fields) {
         Logger.error('Chat Inference Failed')
-        stop()
+        await stop()
         return
     }
     fields.stopGenerating = stop
     let reasoningMode: 'structured' | 'raw' | null = null
     fields.onData = (output) => {
         if (!reasoningMode && output.type === 'reasoning') {
-            Chats.useChatState.getState().insertToBuffer('<think>')
+            Chats.useChatState.getState().insertToBuffer(swipeId, '<think>')
             reasoningMode = 'raw'
         }
 
         if (reasoningMode === 'raw' && output.type !== 'reasoning' && reasoningMode === 'raw') {
-            Chats.useChatState.getState().insertToBuffer('</think>\n')
+            Chats.useChatState.getState().insertToBuffer(swipeId, '</think>\n')
             reasoningMode = null
         }
 
@@ -137,32 +143,33 @@ async function chatInferenceStream() {
             reasoningMode = null
         }
 
-        Chats.useChatState.getState().insertToBuffer(output.content)
+        Chats.useChatState.getState().insertToBuffer(swipeId, output.content)
 
         /**
          * considerations
          * - add tool calls
          */
-        if (!reasoningMode) useTTSStore.getState().insertBuffer(output.content)
+        // Only feed live TTS from the chat the user is currently viewing —
+        // parallel background generations should not speak over it.
+        if (!reasoningMode && Chats.useChatState.getState().id === chatId)
+            useTTSStore.getState().insertBuffer(output.content)
     }
 
     fields.onEnd = async () => {
-        const chatId = Chats.useChatState.getState().id
-        if (!chatId) return
         const chatName = await Chats.db.query.chatName(chatId)
         if (!mmkv.getBoolean(AppSettings.AutoGenerateTitle) || chatName !== 'New Chat') return
         Logger.info('Generating Title')
         titleGeneratorStream(chatId)
     }
     const abort = await buildAndSendRequest(fields)
-    useInference.getState().setAbort(() => {
+    useInference.getState().setAbort(swipeId, () => {
         Logger.debug('Running Abort')
         abort?.()
     })
 }
 
 const titleGeneratorStream = async (chatId: number) => {
-    const fields = await obtainFields()
+    const fields = await obtainFields(chatId)
     if (!fields) {
         Logger.error('Title Generation Failed')
         return
@@ -216,6 +223,10 @@ const titleGeneratorStream = async (chatId: number) => {
     await buildAndSendRequest(fields)
 }
 
+// Session-scoped: the stop-sequence truncation warning fired once per
+// generation, 100% of the time — warn once and stay quiet.
+let warnedStopSequenceLimit = false
+
 const getModelContextLength = (config: APIConfiguration, values: APIValues): number | undefined => {
     const keys = config.model.contextSizeParser.split('.')
     const result = keys.reduce((acc, key) => acc?.[key], values.model)
@@ -224,7 +235,7 @@ const getModelContextLength = (config: APIConfiguration, values: APIValues): num
 
 // This is the 'big orchestrator' which compiles fields from
 // the whole app to send inference requests
-async function obtainFields(): Promise<APIBuilderParams | void> {
+async function obtainFields(chatId: number): Promise<APIBuilderParams | void> {
     try {
         const userState = Characters.useUserStore.getState()
         const characterState = Characters.useCharacterStore.getState()
@@ -243,7 +254,6 @@ async function obtainFields(): Promise<APIBuilderParams | void> {
             return
         }
 
-        const chatId = Chats.useChatState.getState().id
         if (!chatId) {
             Logger.errorToast(t('generation.errors.noActiveChat'))
             return
@@ -274,15 +284,29 @@ async function obtainFields(): Promise<APIBuilderParams | void> {
         const modelLengthField = getModelContextLength(apiConfig, apiValues)
         const instructLength = samplers.max_length as number
         const modelLength = modelLengthField ?? (instructLength as number)
+        // Generated-length slider pinned to max = uncapped (the field is
+        // omitted from the request). Do NOT subtract the sentinel 32k from
+        // the prompt budget — that would starve or zero the history window.
+        const genamt = samplers.genamt as number
+        const genValues = SamplerDefs[SamplerID.GENERATED_LENGTH].values
+        const genUncapped =
+            (genValues.type === 'integer' || genValues.type === 'float') && genamt >= genValues.max
         const length = apiConfig.model.useModelContextLength
             ? Math.min(modelLength, instructLength)
-            : instructLength - (samplers.genamt as number)
+            : instructLength - (genUncapped ? 0 : genamt)
 
         let stopSequence = instructState.getStopSequence()
         const stopSequenceLimit = apiConfig.request.stopSequenceLimit
         if (stopSequenceLimit && stopSequence?.length > stopSequenceLimit) {
             stopSequence = stopSequence.slice(0, stopSequenceLimit)
-            Logger.warn('Stop sequence length exceeds defined stopSequenceLimit')
+            // Once per session — this fired on 100% of generations and was
+            // pure log noise (46 lines in one field trace).
+            if (!warnedStopSequenceLimit) {
+                warnedStopSequenceLimit = true
+                Logger.warn(
+                    `Stop sequences truncated to template limit (${stopSequenceLimit}) — further occurrences suppressed`
+                )
+            }
         }
         const tokenizer = Tokenizer.getTokenizer()
 
@@ -305,16 +329,21 @@ async function obtainFields(): Promise<APIBuilderParams | void> {
                 if (entry.id === -1) return 0
                 const [activeSwipe] = entry.swipes.filter((item) => item.active)
                 if (!activeSwipe) return 0
-                const tokenCount = activeSwipe.token_count ?? 0
-                if (tokenCount === 0 && activeSwipe.swipe.length > 0) {
-                    // assume that token length hasnt been calculated
-                    const tokenCount = await tokenizer(
-                        activeSwipe.swipe,
-                        entry.attachments.map((item) => item.uri)
-                    )
-                    await Chats.db.mutate.updateSwipeTokenLength(activeSwipe.id, tokenCount)
-                }
-                return activeSwipe.token_count ?? 0
+                // FIX: the persisted count lives in `token_length` (the actual
+                // schema column). The old code read the never-populated
+                // `token_count` view-model field AND returned the stale value
+                // after recomputing — every message counted as 0 tokens, so the
+                // context size never moved (constant 947 in the field trace)
+                // and history was never trimmed correctly.
+                const cached = activeSwipe.token_length ?? 0
+                if (cached > 0) return cached
+                if (activeSwipe.swipe.length === 0 && entry.attachments.length === 0) return 0
+                const computed = await tokenizer(
+                    activeSwipe.swipe,
+                    entry.attachments.map((item) => item.uri)
+                )
+                await Chats.db.mutate.updateSwipeTokenLength(activeSwipe.id, computed)
+                return computed
             },
             tokenizer: tokenizer,
             maxLength: length,
@@ -327,6 +356,9 @@ async function obtainFields(): Promise<APIBuilderParams | void> {
         }
     } catch (e) {
         Logger.stackTrace(e)
-        Logger.errorToast(t('generation.errors.failedToOrchestrateRequestBuild'), JSON.stringify(e))
+        Logger.errorToast(
+            t('generation.errors.failedToOrchestrateRequestBuild'),
+            Logger.formatError(e)
+        )
     }
 }

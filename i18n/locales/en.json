@@ -42,9 +42,9 @@
         "item": {
             "comments": "Comments",
             "content": "Note Content",
-            "depth": "Depth",
             "noContent": "No Content",
-            "priority": "Priority"
+            "priority": "Priority",
+            "depth": "Depth"
         },
         "selector": {
             "character": "Character",
@@ -64,9 +64,22 @@
                 "changeBackground": "Change Background",
                 "changeImage": "Change Image",
                 "export": "Export",
-                "manageLinks": "Manage Links",
                 "removeBackground": "Remove Background",
-                "viewImage": "View Image"
+                "viewImage": "View Image",
+                "manageLinks": "Manage Links"
+            },
+            "links": {
+                "missingUser": "No Linked User",
+                "missingInstruct": "No Linked Formatting",
+                "missingModel": "No Linked Model",
+                "missingConnection": "No Linked Connection",
+                "missingSampler": "No Linked Sampler",
+                "description": "Linked configurations will automatically load when this character is loaded",
+                "loadUser": "Loading user with id: {{value}}",
+                "loadInstruct": "Loading instruct with id: {{value}}",
+                "loadModel": "Loading model with id: {{value}}",
+                "loadConnection": "Loading connection with index: {{value}}",
+                "loadSampler": "Loading sampler with index: {{value}}"
             },
             "dialogs": {
                 "clone": {
@@ -108,7 +121,10 @@
                 "exportFailed": "Failed to export",
                 "failedToCopyCard": "Failed to copy card",
                 "invalidCharacterCard": "Invalid Character Card",
-                "v2ParsingFailedFallingBack": "V2 Parsing failed, falling back to V1"
+                "v2ParsingFailedFallingBack": "V2 Parsing failed, falling back to V1",
+                "jsonIsApiTemplate": "This file is an API connection Template — import it in Connections → ⚙ → Manage Templates",
+                "jsonIsInstruct": "This file is an Instruct/Formatting template — import it in the Formatting screen",
+                "jsonIsSampler": "This file is a Sampler configuration — import it in the Samplers screen"
             },
             "fields": {
                 "alternateGreeting": "Alternate Greeting",
@@ -118,19 +134,6 @@
                 "scenario": "Scenario",
                 "tags": "Tags"
             },
-            "links": {
-                "description": "Linked configurations will automatically load when this character is loaded",
-                "loadConnection": "Loading connection with index: {{value}}",
-                "loadInstruct": "Loading instruct with id: {{value}}",
-                "loadModel": "Loading model with id: {{value}}",
-                "loadSampler": "Loading sampler with index: {{value}}",
-                "loadUser": "Loading user with id: {{value}}",
-                "missingConnection": "No Linked Connection",
-                "missingInstruct": "No Linked Formatting",
-                "missingModel": "No Linked Model",
-                "missingSampler": "No Linked Sampler",
-                "missingUser": "No Linked User"
-            },
             "messages": {
                 "deleted": "Deleted character: {{name}}",
                 "exported": "Card Exported!",
@@ -139,7 +142,12 @@
             "metrics": {
                 "descriptionTokens": "Description Tokens: {{count}}"
             },
-            "title": "Character Editor"
+            "title": "Character Editor",
+            "embedded": {
+                "unpackedInstruct": "Loaded embedded Instruct template: {{name}}",
+                "unpackedSampler": "Loaded embedded Sampler config: {{name}}",
+                "unpackFailed": "Failed to unpack embedded presets"
+            }
         },
         "list": {
             "actions": {
@@ -268,11 +276,14 @@
             "errors": {
                 "abortGeneration": "Aborting Generation",
                 "failedToSend": "Failed to send message",
-                "permissionDescription": "Media access required for adding attachments"
+                "permissionDescription": "Media access required for adding attachments",
+                "failedToSwitchContext": "Failed to open new conversation",
+                "singleImageGuard": "Single-image guard: {{count}} images attached — remove extras to send"
             },
             "message": "Message...",
             "noConnection": "No Connection Enabled",
-            "noModelLoaded": "No Model Loaded"
+            "noModelLoaded": "No Model Loaded",
+            "queuedSend": "Queued — sends when this reply finishes"
         },
         "model": {
             "noModelLoaded": "No Model Loaded"
@@ -319,26 +330,17 @@
             "create": "Create",
             "delete": "Delete",
             "disable": "Disable",
-            "discard": "Discard",
-            "discardChanges": "Discard Changes",
             "edit": "Edit",
             "enable": "Enable",
             "export": "Export",
-            "link": "Link",
             "more": "More",
             "rename": "Rename",
             "reset": "Reset",
             "save": "Save",
-            "search": "Search",
-            "select": "Select",
             "test": "Test",
-            "tryAgain": "Try Again"
-        },
-        "alert": {
-            "unsaved": {
-                "description": "You have unsaved changes, exiting will discard all changes.",
-                "title": "Unsaved Changes"
-            }
+            "tryAgain": "Try Again",
+            "select": "Select",
+            "link": "Link"
         },
         "brand": {
             "name": "ChatterUI"
@@ -353,13 +355,11 @@
             "fileInvalid": "File Invalid",
             "filenameInvalidImportFailed": "Filename invalid, Import Failed",
             "invalidFileType": "Invalid File Type!",
-            "permissionRequired": "Permission Required",
             "rollingBackDueToError": "Rolling back due to error",
-            "schemaValidationFailed": "Schema validation failed!"
+            "schemaValidationFailed": "Schema validation failed!",
+            "permissionRequired": "Permission Required"
         },
         "labels": {
-            "comment": "Comment",
-            "content": "Content",
             "cpu": "CPU",
             "description": "Description",
             "devMode": "DEV MODE",
@@ -367,7 +367,6 @@
             "internal": "Internal",
             "name": "Name",
             "none": "None",
-            "preferences": "Preferences",
             "result": "Result",
             "results": "Results",
             "selected": "Selected",
@@ -412,7 +411,6 @@
         "editor": {
             "apiKey": "API Key",
             "completionUrl": "Completion URL",
-            "customFields": "Custom Fields",
             "firstMessage": "First Message",
             "firstMessageHint": "Default first message sent to Claude",
             "friendlyName": "Friendly Name",
@@ -424,6 +422,7 @@
             "prefillHint": "Prefill before model response",
             "saveButton": "Save Changes",
             "selectModel": "Select Model",
+            "customFields": "Custom Fields",
             "title": "Edit Connection"
         },
         "failedToConnect": "Failed To Connect",
@@ -440,11 +439,6 @@
             "header": "Connections"
         },
         "notConnected": "Not Connected",
-        "options": {
-            "disableCustomFields": "Disable Custom Fields",
-            "enableCustomFields": "Enable Custom Fields",
-            "manageTemplates": "Manage Templates"
-        },
         "templates": {
             "delete": {
                 "confirm": "Delete Template",
@@ -460,13 +454,20 @@
             "paste": "Paste Template",
             "pasteSheetTitle": "Paste Template Here",
             "title": "Template Manager"
+        },
+        "options": {
+            "manageTemplates": "Manage Templates",
+            "enableCustomFields": "Enable Custom Fields",
+            "disableCustomFields": "Disable Custom Fields"
         }
     },
     "contextlimit": {
         "allocation": "Context Allocation",
         "chat": "Chat Context",
         "generated": "Generated",
-        "warning": "Low Chat Context will forget messages faster"
+        "warning": "Low Chat Context will forget messages faster",
+        "nolimit": "No Limit",
+        "uncappedWarning": "Set to maximum — no app-side limit is applied; the model/provider ceiling decides"
     },
     "db": {
         "migrationerror": {
@@ -571,7 +572,8 @@
         },
         "warn": {
             "entryWithoutValidSwipeFound": "Entry without valid swipe found",
-            "noMessagesAddedCheckLogs": "No messages added. Check Logs."
+            "noMessagesAddedCheckLogs": "No messages added. Check Logs.",
+            "attachmentUnreadable": "Attachment \"{{name}}\" could not be read and was skipped"
         }
     },
     "horizontalSelector": {
@@ -615,44 +617,6 @@
             "downloadok": "Logs Downloaded!"
         }
     },
-    "lorebook": {
-        "delete": {
-            "description": "Are you sure you want to delete '{{name}}'?\n\nThis cannot be undone.",
-            "title": "Delete Lorebook"
-        },
-        "deleteEntry": {
-            "description": "Are you sure you want to delete the entry '{{name}}'?\n\nThis cannot be undone.",
-            "title": "Delete Entry"
-        },
-        "empty": "No Lorebooks Added",
-        "fields": {
-            "caseSensitive": "Case Sensitive",
-            "constant": "Constant",
-            "entries": "Entries",
-            "insertionOrder": "Insertion Order",
-            "keys": "Keys",
-            "priority": "Priority",
-            "recursiveScanning": "Recursive Scanning",
-            "scanDepth": "Scan Depth",
-            "secondaryKeys": "Secondary Keys",
-            "selective": "Selective",
-            "tokenBudget": "Token Budget"
-        },
-        "import": "Import Lorebook",
-        "labels": {
-            "generationSettings": "Generation Settings",
-            "info": "Lorebook Info"
-        },
-        "preferences": {
-            "afterLast": "After Last",
-            "afterSystem": "After System",
-            "beforeLast": "Before Last",
-            "index": "Index",
-            "insertionDepth": "Insertion Depth",
-            "insertionType": "Insertion Strategy"
-        },
-        "title": "Lorebooks"
-    },
     "model": {
         "alert": {
             "deletekv": {
@@ -685,16 +649,16 @@
             "noparamsize": "No Param Size",
             "rename": "Rename Model"
         },
-        "linkmmproj": "Link MMPROJ",
-        "magic": "Header: {{magic}}, Hex: {{hex}}",
         "maxcontext": "Max Context",
-        "mmproj": "mmproj",
         "modelnamechat": "Show Model Name In Chat",
         "mtmd": "Multimodal Adapters",
         "purgekv": "Purge KV Cache ({{size}})",
         "savekv": "Save Local KV",
         "savekvdesc": "Saves the KV cache on generations, allowing you to continue sessions after closing the app. Must use the same model for this to function properly. Saving the KV cache file may be very big and negatively impact battery life!",
         "selectmmproj": "Select MMPROJ Model",
+        "linkmmproj": "Link MMPROJ",
+        "unlinkmmproj": "Unlink MMPROJ",
+        "mmproj": "mmproj",
         "settings": {
             "advanced": "Advanced Settings",
             "cpu": "CPU Settings",
@@ -708,11 +672,11 @@
             "couldNotLoadModel": "Could Not Load Model",
             "deletekv": "KV Cache deleted!",
             "failedToGenerateLocally": "Failed to generate locally",
-            "failedtolink": "Failed to link model",
-            "failedtoload": "Failed to load model",
             "failedToLoadMMPROJ": "Failed to load MMPROJ",
             "failedToRunLocalInference": "Failed to run local inference",
             "failedToUnloadMMPROJ": "Failed to unload MMPROJ",
+            "failedtolink": "Failed to link model",
+            "failedtoload": "Failed to load model",
             "mediaAddedWithoutMMPROJModel": "Media was added without MMPROJ model",
             "mediaAddedWithoutMultimodalSupport": "Media was added without multimodal support.",
             "modelAlreadyLoaded": "Model Already Loaded!",
@@ -722,8 +686,7 @@
             "noAutoLoadModelSet": "No Auto-Load Model Set",
             "noModelLoaded": "No Model Loaded",
             "quantizationNoLongerSupported": "Quantization No Longer Supported!"
-        },
-        "unlinkmmproj": "Unlink MMPROJ"
+        }
     },
     "multiDropdown": {
         "counter_one": "Selected {{count}} item",
@@ -733,7 +696,6 @@
     "navigation": {
         "about": "About",
         "api": "API",
-        "dataSources": "Data Sources",
         "dev_colortest": "[DEV] ColorTest",
         "dev_components": "[DEV] Components",
         "dev_markdown": "[DEV] Markdown",
@@ -928,7 +890,24 @@
             "description": "Hide characters with the following tags from the character list.",
             "label": "Hidden Tags"
         },
-        "title": "Settings"
+        "title": "Settings",
+        "vision": {
+            "title": "Vision & Attachments",
+            "disableCamera": "Disable Camera",
+            "disableCameraDescription": "Removes the camera from the attachment menu — the attach button opens the image picker directly",
+            "sendOnAttach": "Send when Attached",
+            "sendOnAttachDescription": "Automatically sends the message as soon as images are picked — no extra tap on Send",
+            "switchContextOnSend": "Switch Context on Send",
+            "switchContextOnSendDescription": "After a send completes, moves to a fresh conversation while the reply streams in the background. Does not send by itself — combine with Send when Attached for pick → send → new context",
+            "experimentalTitle": "Experimental — Android pipeline",
+            "chainCapture": "Chain Capture (2-press loop)",
+            "chainCaptureDescription": "After a chained send, automatically reopens the image picker: tap image → tap OK → sent + new chat + picker is back. Cancel/back in the picker exits the loop",
+            "chainCaptureGated": "Requires Disable Camera + Send when Attached + Switch Context on Send all enabled",
+            "rememberPickerPosition": "Remember last picker position",
+            "rememberPickerPositionDescription": "Uses the classic Android gallery picker, which keeps your scroll position (July, June, …) between launches. The modern Photo Picker always reopens at Recents",
+            "singleImageGuard": "Guard against multi-image sends",
+            "singleImageGuardDescription": "Refuses to send when more than one image is attached and puts the picker in single-select mode"
+        }
     },
     "stringArrayEditor": {
         "add": "Add",

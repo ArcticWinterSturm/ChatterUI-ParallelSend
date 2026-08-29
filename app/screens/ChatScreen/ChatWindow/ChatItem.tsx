@@ -41,7 +41,10 @@ const ChatItemBody: React.FC<ChatItemBodyProps> = ({
     entrySwipeIds,
     ...rest
 }) => {
-    const nowGenerating = useInference((state) => state.nowGenerating)
+    // Scope generation state to the chat in view: background generations in
+    // other chats must not lock this chat's UI.
+    const chatId = Chats.useChatState((state) => state.id)
+    const nowGenerating = useInference((state) => state.isChatGenerating(chatId))
     const { data: entry } = useQueuedLiveQuery(Chats.db.live.entry(entryId), [entryId], {
         targets: [
             { tableName: 'chat_entries', rowId: entryId },

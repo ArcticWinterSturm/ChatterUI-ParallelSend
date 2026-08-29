@@ -325,9 +325,27 @@ const getSamplerFields = (
             let cleanvalue = value
             if (typeof value === 'number') {
                 const type = samplerItem.values.type
+
+                // Slider at its maximum = NO LIMIT: omit the cap from the
+                // request entirely so the provider/model ceiling applies
+                // (a model able to emit 128k tokens per turn must not be
+                // clamped by our 32k slider maximum).
                 if (
-                    type === 'float' ||
-                    (type === 'integer' && value === samplerItem.values.ignoreIf)
+                    item.samplerID === SamplerID.GENERATED_LENGTH &&
+                    (type === 'integer' || type === 'float') &&
+                    value >= samplerItem.values.max
+                ) {
+                    return {}
+                }
+
+                // UPSTREAM FIX: was `type === 'float' || (type === 'integer'
+                // && value === ignoreIf)` — the misplaced parenthesis dropped
+                // EVERY float sampler (temperature, top_p, penalties, …) from
+                // every request. Intended: skip a numeric sampler only when
+                // its value equals the ignore sentinel.
+                if (
+                    (type === 'float' || type === 'integer') &&
+                    value === samplerItem.values.ignoreIf
                 ) {
                     return {}
                 }
